@@ -1,0 +1,195 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Temporary isolated reproduction of SQS success with S3 AccessDenied for a CloudTrail-style pipeline",
+  "Parameters": {
+    "IncludeS3Permissions": {
+      "Type": "String",
+      "Default": "false",
+      "AllowedValues": ["true", "false"],
+      "Description": "Whether to attach the least-privilege S3 read policy"
+    },
+    "TestPrefix": {
+      "Type": "String",
+      "Default": "AWSLogs/repro/CloudTrail",
+      "AllowedPattern": "^[A-Za-z0-9!_.*'()/=-]+$",
+      "Description": "S3 prefix containing the synthetic CloudTrail-shaped object"
+    }
+  },
+  "Conditions": {
+    "AddS3Permissions": {
+      "Fn::Equals": [
+        {"Ref": "IncludeS3Permissions"},
+        "true"
+      ]
+    }
+  },
+  "Resources": {
+    "ReproQueue": {
+      "Type": "AWS::SQS::Queue",
+      "Properties": {
+        "KmsMasterKeyId": "alias/aws/sqs",
+        "MessageRetentionPeriod": 86400
+      }
+    },
+    "ReproQueuePolicy": {
+      "Type": "AWS::SQS::QueuePolicy",
+      "Properties": {
+        "Queues": [{"Ref": "ReproQueue"}],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "AllowS3NotificationsFromThisAccount",
+              "Effect": "Allow",
+              "Principal": {"Service": "s3.amazonaws.com"},
+              "Action": "sqs:SendMessage",
+              "Resource": {"Fn::GetAtt": ["ReproQueue", "Arn"]},
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": {"Ref": "AWS::AccountId"}
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "ReproBucket": {
+      "Type": "AWS::S3::Bucket",
+      "DependsOn": "ReproQueuePolicy",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "NotificationConfiguration": {
+          "QueueConfigurations": [
+            {
+              "Event": "s3:ObjectCreated:*",
+              "Queue": {"Fn::GetAtt": ["ReproQueue", "Arn"]}
+            }
+          ]
+        },
+        "OwnershipControls": {
+          "Rules": [{"ObjectOwnership": "BucketOwnerEnforced"}]
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        }
+      }
+    },
+    "ReproRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "Description": "Temporary role for reproducing a CloudTrail pipeline S3 permission failure",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+                }
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "InitialSqsOnly",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "sqs:ReceiveMessage",
+                    "sqs:DeleteMessage",
+                    "sqs:GetQueueAttributes"
+                  ],
+                  "Resource": {"Fn::GetAtt": ["ReproQueue", "Arn"]}
+                }
+              ]
+            }
+          },
+          {
+            "Fn::If": [
+              "AddS3Permissions",
+              {
+                "PolicyName": "MdcCloudTrailPipelineAccess",
+                "PolicyDocument": {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Sid": "ReadBucketMetadata",
+                      "Effect": "Allow",
+                      "Action": "s3:GetBucketLocation",
+                      "Resource": {"Fn::GetAtt": ["ReproBucket", "Arn"]}
+                    },
+                    {
+                      "Sid": "ListCloudTrailPrefix",
+                      "Effect": "Allow",
+                      "Action": "s3:ListBucket",
+                      "Resource": {"Fn::GetAtt": ["ReproBucket", "Arn"]},
+                      "Condition": {
+                        "StringLike": {
+                          "s3:prefix": [
+                            {"Fn::Sub": "${TestPrefix}"},
+                            {"Fn::Sub": "${TestPrefix}/*"}
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "Sid": "ReadCloudTrailObjects",
+                      "Effect": "Allow",
+                      "Action": "s3:GetObject",
+                      "Resource": {
+                        "Fn::Sub": "${ReproBucket.Arn}/${TestPrefix}/*"
+                      }
+                    }
+                  ]
+                }
+              },
+              {"Ref": "AWS::NoValue"}
+            ]
+          }
+        ],
+        "Tags": [
+          {"Key": "Purpose", "Value": "MdcCloudTrailPermissionReproduction"}
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "BucketName": {
+      "Value": {"Ref": "ReproBucket"}
+    },
+    "QueueArn": {
+      "Value": {"Fn::GetAtt": ["ReproQueue", "Arn"]}
+    },
+    "QueueUrl": {
+      "Value": {"Ref": "ReproQueue"}
+    },
+    "RoleArn": {
+      "Value": {"Fn::GetAtt": ["ReproRole", "Arn"]}
+    },
+    "RoleName": {
+      "Value": {"Ref": "ReproRole"}
+    },
+    "TestPrefix": {
+      "Value": {"Ref": "TestPrefix"}
+    }
+  }
+}
+
