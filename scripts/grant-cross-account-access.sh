@@ -207,7 +207,7 @@ jq \
   --arg prefix "${CLOUDTRAIL_PREFIX}" \
   '
   .QueueConfigurations = ((.QueueConfigurations // [])
-      | map(select(.Id != "MdcDefenderCloudTrail"))
+      | map(select(.Id != "MdcDefenderCloudTrail" and .QueueArn != $queue))
       + [
           {
             "Id": "MdcDefenderCloudTrail",
