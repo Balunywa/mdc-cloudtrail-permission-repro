@@ -142,6 +142,33 @@ Use `CloudTrailBucketArn` for the S3 bucket ARN and `CloudTrailQueueArn` for the
 SQS ARN. The Defender-generated onboarding stack is still required because it
 creates the Microsoft access roles and OIDC providers.
 
+## Grant access to a customer's existing trail
+
+If the customer already has CloudTrail, S3, and a dedicated SQS queue, deploy
+the permission-only template after deploying the Defender-generated onboarding
+template:
+
+```bash
+aws cloudformation deploy \
+  --region us-east-1 \
+  --stack-name mdc-existing-cloudtrail-permissions \
+  --template-file infrastructure/existing-cloudtrail-permissions.json \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides \
+    DefenderRoleName=DefenderForCloud-LogCollection \
+    CloudTrailBucketName=customer-cloudtrail-bucket \
+    CloudTrailObjectPrefix='AWSLogs/*' \
+    CloudTrailQueueArn=arn:aws:sqs:us-east-1:123456789012:customer-defender-cloudtrail
+```
+
+Set `KmsKeyArn` when CloudTrail objects use a customer-managed KMS key. The KMS
+key policy must also allow the Defender role.
+
+This template adds identity permissions only. It does not modify or replace the
+customer's trail, bucket, queue, bucket policy, queue policy, KMS key policy, or
+S3 event notifications. Cross-account resource policies and organization SCPs
+must independently permit the same access.
+
 ## Optional configuration
 
 All scripts accept these environment variables:

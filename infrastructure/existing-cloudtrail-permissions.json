@@ -1,0 +1,133 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Attach least-privilege existing CloudTrail S3 and SQS access to an existing Microsoft Defender for Cloud role",
+  "Parameters": {
+    "DefenderRoleName": {
+      "Type": "String",
+      "Default": "DefenderForCloud-LogCollection",
+      "AllowedPattern": "^[A-Za-z0-9+=,.@_-]{1,64}$",
+      "Description": "Existing log collection role created by the Defender for Cloud onboarding template"
+    },
+    "CloudTrailBucketName": {
+      "Type": "String",
+      "AllowedPattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
+      "Description": "Existing S3 bucket that stores CloudTrail logs"
+    },
+    "CloudTrailObjectPrefix": {
+      "Type": "String",
+      "Default": "AWSLogs/*",
+      "AllowedPattern": "^[A-Za-z0-9!_.*'()/=-]+$",
+      "Description": "Object prefix to grant, including a trailing wildcard"
+    },
+    "CloudTrailQueueArn": {
+      "Type": "String",
+      "AllowedPattern": "^arn:(aws|aws-us-gov|aws-cn):sqs:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,80}$",
+      "Description": "ARN of the dedicated SQS queue associated with the CloudTrail bucket"
+    },
+    "KmsKeyArn": {
+      "Type": "String",
+      "Default": "",
+      "AllowedPattern": "^$|^arn:(aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:[0-9]{12}:key/[A-Fa-f0-9-]+$",
+      "Description": "Optional customer-managed KMS key ARN used to encrypt CloudTrail objects"
+    }
+  },
+  "Conditions": {
+    "UsesCustomerManagedKmsKey": {
+      "Fn::Not": [
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "KmsKeyArn"
+            },
+            ""
+          ]
+        }
+      ]
+    }
+  },
+  "Resources": {
+    "DefenderCloudTrailAccessPolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "Description": "Least-privilege access for Defender for Cloud to consume an existing CloudTrail S3 and SQS pipeline",
+        "Roles": [
+          {
+            "Ref": "DefenderRoleName"
+          }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "ReadCloudTrailBucketMetadata",
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetBucketLocation",
+                "s3:GetBucketNotification",
+                "s3:ListBucket"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${CloudTrailBucketName}"
+              }
+            },
+            {
+              "Sid": "ReadCloudTrailObjects",
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${CloudTrailBucketName}/${CloudTrailObjectPrefix}"
+              }
+            },
+            {
+              "Sid": "ConsumeDedicatedCloudTrailQueue",
+              "Effect": "Allow",
+              "Action": [
+                "sqs:ChangeMessageVisibility",
+                "sqs:DeleteMessage",
+                "sqs:GetQueueAttributes",
+                "sqs:GetQueueUrl",
+                "sqs:ReceiveMessage"
+              ],
+              "Resource": {
+                "Ref": "CloudTrailQueueArn"
+              }
+            },
+            {
+              "Fn::If": [
+                "UsesCustomerManagedKmsKey",
+                {
+                  "Sid": "DecryptCloudTrailObjects",
+                  "Effect": "Allow",
+                  "Action": [
+                    "kms:Decrypt",
+                    "kms:DescribeKey"
+                  ],
+                  "Resource": {
+                    "Ref": "KmsKeyArn"
+                  }
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "AttachedRoleName": {
+      "Value": {
+        "Ref": "DefenderRoleName"
+      }
+    },
+    "ManagedPolicyArn": {
+      "Value": {
+        "Ref": "DefenderCloudTrailAccessPolicy"
+      }
+    }
+  }
+}
