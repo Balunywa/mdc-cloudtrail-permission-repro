@@ -114,6 +114,34 @@ credentials are never written to the evidence files.
 The teardown script resolves the bucket from CloudFormation, empties it, deletes
 the stack, and waits for `DELETE_COMPLETE`.
 
+## Provision an existing CloudTrail pipeline
+
+For Defender for Cloud's **Manually provide trail details** option, deploy the
+production-shaped pipeline template:
+
+```bash
+aws cloudformation deploy \
+  --region us-east-1 \
+  --stack-name mdc-existing-cloudtrail \
+  --template-file infrastructure/existing-cloudtrail-template.json
+```
+
+The stack creates a multi-Region management-event trail, encrypted S3 bucket,
+dedicated encrypted Standard SQS queue, S3 event notification, and required
+resource policies. Retrieve the values to enter in Defender for Cloud:
+
+```bash
+aws cloudformation describe-stacks \
+  --region us-east-1 \
+  --stack-name mdc-existing-cloudtrail \
+  --query "Stacks[0].Outputs" \
+  --output table
+```
+
+Use `CloudTrailBucketArn` for the S3 bucket ARN and `CloudTrailQueueArn` for the
+SQS ARN. The Defender-generated onboarding stack is still required because it
+creates the Microsoft access roles and OIDC providers.
+
 ## Optional configuration
 
 All scripts accept these environment variables:
@@ -164,4 +192,3 @@ historical ingestion was running.
 - The lab incurs small S3, SQS, and CloudFormation-related usage charges until
   it is removed.
 - Always run `./scripts/teardown.sh` when the demonstration is complete.
-
