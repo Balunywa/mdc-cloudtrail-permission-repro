@@ -169,6 +169,34 @@ customer's trail, bucket, queue, bucket policy, queue policy, KMS key policy, or
 S3 event notifications. Cross-account resource policies and organization SCPs
 must independently permit the same access.
 
+### Automate cross-account resource-policy grants
+
+When the Defender role and centralized logging resources are in different AWS
+accounts, run the merge script from AWS CloudShell in the account that owns the
+S3 bucket and SQS queue:
+
+```bash
+export DEFENDER_ROLE_ARN=arn:aws:iam::111122223333:role/DefenderForCloud-LogCollection
+export CLOUDTRAIL_BUCKET_NAME=central-cloudtrail-bucket
+export CLOUDTRAIL_QUEUE_ARN=arn:aws:sqs:us-east-1:444455556666:defender-cloudtrail
+export CLOUDTRAIL_PREFIX=AWSLogs/
+
+./scripts/grant-cross-account-access.sh
+./scripts/grant-cross-account-access.sh --apply
+```
+
+The first run is a dry run. The apply run:
+
+- Backs up existing SQS, S3, notification, and optional KMS policies
+- Merges idempotent Defender statements without removing existing statements
+- Allows the central bucket to publish S3 notifications to the dedicated queue
+- Allows the cross-account Defender role to consume the queue and read logs
+- Preserves unrelated S3 event-notification configurations
+
+Set `KMS_KEY_ARN` for SSE-KMS and `CONFIGURE_S3_NOTIFICATION=false` when the
+correct S3-to-SQS notification already exists. The script stops if the active
+AWS session is not in the SQS-owning account.
+
 ## Optional configuration
 
 All scripts accept these environment variables:
